@@ -1,0 +1,83 @@
+<!doctype html>
+<!--
+  Sertifika karekodunun gösterdiği ara sayfa (bkz. SERTIFIKA-KAREKOD.md).
+  Kaynağı KalibraMobil deposunda: tools/sertifika-yonlendirme/sayfa/index.html.
+  Yayını ayrı, herkese açık "sertifika" deposunda (GitHub Pages); orada elle düzenlemeyin.
+
+  Karekod: <bu sayfa>?r=<künye no>-<ek>
+  Sayfa, Apps Script betiğine numarayı ÇEREZSİZ sorar (credentials: 'omit'). Telefonda
+  birden çok Google hesabı açıkken betiğin adresine doğrudan gidilince Google /u/<n>/
+  yönlendirmesi yapıyor ve "dosyayı açamıyoruz" hatası çıkıyor; çerezsiz istekte olmuyor.
+-->
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Kalibrasyon sertifikası</title>
+<style>
+  :root { --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #5b6475; --accent: #1a7f37; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #12151b; --card: #1c2029; --text: #e7eaf0; --muted: #9aa3b5; --accent: #2ea043; }
+  }
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 32px 16px; background: var(--bg); color: var(--text); }
+  main { max-width: 420px; margin: 0 auto; background: var(--card); border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  p { line-height: 1.5; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .button { display: block; text-align: center; background: var(--accent); color: #fff; text-decoration: none; padding: 14px; border-radius: 8px; font-weight: 600; font-size: 17px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <p class="muted">DK Donanım Kalibrasyon</p>
+  <h1 id="title">Sertifika aranıyor…</h1>
+  <p id="message">Lütfen bekleyin.</p>
+  <p id="action" hidden><a class="button" id="open" href="#">Sertifikayı aç</a></p>
+  <p class="muted" id="contact" hidden></p>
+</main>
+<script>
+  // Apps Script web uygulamasının /exec adresi.
+  var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby5d6pdFeD8-A1UaVOFMCwK8l7SVhRMu43dFL9BSkEmgwK6tZG9HN-Xn0YZt26IWB0YOg/exec';
+
+  function show(title, message, contact) {
+    document.getElementById('title').textContent = title;
+    document.getElementById('message').textContent = message;
+    var c = document.getElementById('contact');
+    c.textContent = contact || '';
+    c.hidden = !contact;
+  }
+
+  var r = (new URLSearchParams(location.search).get('r') || '').trim();
+  if (!/^\d{4,20}-[0-9a-f]{6}$/.test(r)) {
+    show('Karekod geçersiz', 'Bu karekod tanınmadı.');
+  } else {
+    fetch(SCRIPT_URL + '?format=json&r=' + encodeURIComponent(r), { credentials: 'omit' })
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        if (data.status === 'ok' && data.url) {
+          document.getElementById('open').href = data.url;
+          document.getElementById('action').hidden = false;
+          show('Kalibrasyon sertifikası', 'Künye no ' + data.number + ' · sertifika açılıyor…', data.contact);
+          location.replace(data.url);
+        } else if (data.status === 'pending') {
+          show(
+            'Sertifika hazırlanıyor',
+            'Künye no ' + data.number + ' için sertifika henüz yüklenmedi. Lütfen daha sonra tekrar okutun.',
+            data.contact
+          );
+        } else {
+          show('Karekod geçersiz', 'Bu karekod tanınmadı.', data.contact);
+        }
+      })
+      .catch(function () {
+        show('Bağlantı kurulamadı', 'Sertifika sorgulanamadı. İnternet bağlantınızı kontrol edip tekrar deneyin.');
+      });
+  }
+</script>
+</body>
+</html>
