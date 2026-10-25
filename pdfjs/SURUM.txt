@@ -1,0 +1,2 @@
+pdfjs-dist 3.11.174, legacy derleme (npm paketinden, bütünlük özeti doğrulandı).
+Lisans: Apache-2.0 (LICENSE); standard_fonts içindeki yazı tipleri kendi lisans dosyalarıyla.

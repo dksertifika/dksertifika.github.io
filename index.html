@@ -9,6 +9,10 @@
   birden çok Google hesabı açıkken betiğin adresine doğrudan gidilince Google /u/<n>/
   yönlendirmesi yapıyor ve "dosyayı açamıyoruz" hatası çıkıyor; çerezsiz istekte olmuyor.
 
+  PDF: Betik dosyanın içeriğini gönderir, sayfa pdf.js ile (pdfjs/, pdfjs-dist 3.11.174
+  legacy, Apache-2.0) tuvallere çizer. Drive bağlantısı yok; indirme/yazdırma düğmesi
+  yok, sağ tık, uzun basma ve yazdırma engelli. Ekran görüntüsünü engellemek mümkün değil.
+
   Şifre: Betikte PAROLA tanımlıysa önce şifre sorulur; kontrolü betik yapar, bu sayfada
   şifre yok. Doğru şifreden sonra betiğin verdiği 30 günlük oturum anahtarı telefonda
   (localStorage) saklanır, şifrenin kendisi saklanmaz.
@@ -32,7 +36,11 @@
   .button { display: block; box-sizing: border-box; width: 100%; text-align: center; background: var(--accent); color: #fff; text-decoration: none; padding: 14px; border: 0; border-radius: 8px; font: inherit; font-weight: 600; font-size: 17px; cursor: pointer; }
   .button:disabled { opacity: .6; }
   input[type=password] { display: block; box-sizing: border-box; width: 100%; margin: 0 0 12px; padding: 12px; border: 1px solid var(--muted); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; font-size: 17px; }
+  body.viewing main { max-width: 900px; padding: 16px; }
+  #pages canvas { display: block; width: 100%; margin: 12px 0 0; box-shadow: 0 1px 3px rgba(0,0,0,.2);
+    -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
   [hidden] { display: none !important; }
+  @media print { body * { display: none !important; } }
 </style>
 </head>
 <body>
@@ -44,7 +52,7 @@
     <input type="password" id="password" autocomplete="current-password" aria-label="Şifre" placeholder="Şifre" required>
     <button class="button" id="submit" type="submit">Devam</button>
   </form>
-  <p id="action" hidden><a class="button" id="open" href="#">Sertifikayı aç</a></p>
+  <div id="pages" hidden></div>
   <p class="muted" id="contact" hidden></p>
 </main>
 <script>
@@ -94,11 +102,9 @@
       .then(function (data) {
         form.hidden = true;
         if (data.token) setToken(data.token);
-        if (data.status === 'ok' && data.url) {
-          document.getElementById('open').href = data.url;
-          document.getElementById('action').hidden = false;
-          show('Kalibrasyon sertifikası', 'Künye no ' + data.number + ' · sertifika açılıyor…', data.contact);
-          location.replace(data.url);
+        if (data.status === 'ok' && data.pdf) {
+          show('Kalibrasyon sertifikası', 'Künye no ' + data.number + ' · sertifika yükleniyor…', data.contact);
+          render(data.pdf, data.number, data.contact);
         } else if (data.status === 'pending') {
           show(
             'Sertifika hazırlanıyor',
@@ -121,6 +127,70 @@
         show('Bağlantı kurulamadı', 'Sertifika sorgulanamadı. İnternet bağlantınızı kontrol edip tekrar deneyin.');
       });
   }
+
+  function loadPdfJs() {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = 'pdfjs/pdf.min.js';
+      s.onload = function () {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdfjs/pdf.worker.min.js';
+        resolve();
+      };
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+
+  function render(base64, number, contact) {
+    var raw = atob(base64);
+    var bytes = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    var box = document.getElementById('pages');
+    loadPdfJs()
+      .then(function () {
+        return pdfjsLib.getDocument({ data: bytes, standardFontDataUrl: 'pdfjs/standard_fonts/' }).promise;
+      })
+      .then(function (pdf) {
+        document.body.classList.add('viewing');
+        box.hidden = false;
+        // Genişlik bir kez: ilk sayfadan sonra kaydırma çubuğu çıkınca daralmasın.
+        // Ekran genişliğinde, yakınlaştırınca da okunacak çözünürlükte (en az 2 kat).
+        var width = box.clientWidth * Math.max(2, window.devicePixelRatio || 1);
+        // Sayfalar sırayla çiziliyor; büyük belgede telefon belleği şişmesin.
+        var chain = Promise.resolve();
+        for (var n = 1; n <= pdf.numPages; n++) {
+          chain = chain.then(drawPage.bind(null, pdf, n, box, width));
+        }
+        return chain;
+      })
+      .then(function () {
+        show('Kalibrasyon sertifikası', 'Künye no ' + number, contact);
+      })
+      .catch(function () {
+        box.hidden = true;
+        show('Sertifika gösterilemedi', 'Sertifika bu cihazda açılamadı. Tekrar okutmayı deneyin.', contact);
+      });
+  }
+
+  function drawPage(pdf, n, box, width) {
+    return pdf.getPage(n).then(function (page) {
+      var base = page.getViewport({ scale: 1 });
+      var scale = Math.min(4, width / base.width);
+      var viewport = page.getViewport({ scale: scale });
+      var canvas = document.createElement('canvas');
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      box.appendChild(canvas);
+      return page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
+    });
+  }
+
+  // İndirmeyi zorlaştırmak için: sağ tık / uzun basma menüsü, kaydet ve yazdır kısayolları.
+  document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  document.addEventListener('keydown', function (e) {
+    var k = (e.key || '').toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && (k === 's' || k === 'p')) e.preventDefault();
+  });
 
   var r = (new URLSearchParams(location.search).get('r') || '').trim();
   if (!/^\d{4,20}-[0-9a-f]{6}$/.test(r)) {
