@@ -8,6 +8,10 @@
   Sayfa, Apps Script betiğine numarayı ÇEREZSİZ sorar (credentials: 'omit'). Telefonda
   birden çok Google hesabı açıkken betiğin adresine doğrudan gidilince Google /u/<n>/
   yönlendirmesi yapıyor ve "dosyayı açamıyoruz" hatası çıkıyor; çerezsiz istekte olmuyor.
+
+  Şifre: Betikte PAROLA tanımlıysa önce şifre sorulur; kontrolü betik yapar, bu sayfada
+  şifre yok. Doğru şifreden sonra betiğin verdiği 30 günlük oturum anahtarı telefonda
+  (localStorage) saklanır, şifrenin kendisi saklanmaz.
 -->
 <html lang="tr">
 <head>
@@ -25,7 +29,9 @@
   h1 { font-size: 20px; margin: 0 0 12px; }
   p { line-height: 1.5; }
   .muted { color: var(--muted); font-size: 14px; }
-  .button { display: block; text-align: center; background: var(--accent); color: #fff; text-decoration: none; padding: 14px; border-radius: 8px; font-weight: 600; font-size: 17px; }
+  .button { display: block; box-sizing: border-box; width: 100%; text-align: center; background: var(--accent); color: #fff; text-decoration: none; padding: 14px; border: 0; border-radius: 8px; font: inherit; font-weight: 600; font-size: 17px; cursor: pointer; }
+  .button:disabled { opacity: .6; }
+  input[type=password] { display: block; box-sizing: border-box; width: 100%; margin: 0 0 12px; padding: 12px; border: 1px solid var(--muted); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; font-size: 17px; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -34,6 +40,10 @@
   <p class="muted">DK Donanım Kalibrasyon</p>
   <h1 id="title">Sertifika aranıyor…</h1>
   <p id="message">Lütfen bekleyin.</p>
+  <form id="login" hidden>
+    <input type="password" id="password" autocomplete="current-password" aria-label="Şifre" placeholder="Şifre" required>
+    <button class="button" id="submit" type="submit">Devam</button>
+  </form>
   <p id="action" hidden><a class="button" id="open" href="#">Sertifikayı aç</a></p>
   <p class="muted" id="contact" hidden></p>
 </main>
@@ -49,16 +59,41 @@
     c.hidden = !contact;
   }
 
-  var r = (new URLSearchParams(location.search).get('r') || '').trim();
-  if (!/^\d{4,20}-[0-9a-f]{6}$/.test(r)) {
-    show('Karekod geçersiz', 'Bu karekod tanınmadı.');
-  } else {
-    fetch(SCRIPT_URL + '?format=json&r=' + encodeURIComponent(r), { credentials: 'omit' })
+  var TOKEN_KEY = 'sertifikaOturum';
+
+  function getToken() {
+    try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; }
+  }
+  function setToken(token) {
+    try {
+      if (token) localStorage.setItem(TOKEN_KEY, token); else localStorage.removeItem(TOKEN_KEY);
+    } catch (e) {}
+  }
+
+  var form = document.getElementById('login');
+  var input = document.getElementById('password');
+  var submit = document.getElementById('submit');
+
+  function askPassword(title, message, contact) {
+    show(title, message, contact);
+    form.hidden = false;
+    submit.disabled = false;
+    input.value = '';
+    input.focus();
+  }
+
+  function query(r, password) {
+    var url = SCRIPT_URL + '?format=json&r=' + encodeURIComponent(r);
+    if (password) url += '&p=' + encodeURIComponent(password);
+    else if (getToken()) url += '&t=' + encodeURIComponent(getToken());
+    fetch(url, { credentials: 'omit' })
       .then(function (res) {
         if (!res.ok) throw new Error('HTTP ' + res.status);
         return res.json();
       })
       .then(function (data) {
+        form.hidden = true;
+        if (data.token) setToken(data.token);
         if (data.status === 'ok' && data.url) {
           document.getElementById('open').href = data.url;
           document.getElementById('action').hidden = false;
@@ -70,13 +105,35 @@
             'Künye no ' + data.number + ' için sertifika henüz yüklenmedi. Lütfen daha sonra tekrar okutun.',
             data.contact
           );
+        } else if (data.status === 'password') {
+          setToken('');
+          askPassword('Şifre gerekli', 'Sertifikayı görmek için şifreyi girin.', data.contact);
+        } else if (data.status === 'wrong') {
+          askPassword('Şifre yanlış', 'Girdiğiniz şifre doğru değil. Tekrar deneyin.', data.contact);
+        } else if (data.status === 'locked') {
+          show('Çok fazla deneme', 'Çok fazla yanlış şifre girildi. Lütfen 15 dakika sonra tekrar deneyin.', data.contact);
         } else {
           show('Karekod geçersiz', 'Bu karekod tanınmadı.', data.contact);
         }
       })
       .catch(function () {
+        form.hidden = true;
         show('Bağlantı kurulamadı', 'Sertifika sorgulanamadı. İnternet bağlantınızı kontrol edip tekrar deneyin.');
       });
+  }
+
+  var r = (new URLSearchParams(location.search).get('r') || '').trim();
+  if (!/^\d{4,20}-[0-9a-f]{6}$/.test(r)) {
+    show('Karekod geçersiz', 'Bu karekod tanınmadı.');
+  } else {
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (!input.value) return;
+      submit.disabled = true;
+      show('Kontrol ediliyor…', 'Lütfen bekleyin.');
+      query(r, input.value);
+    });
+    query(r, '');
   }
 </script>
 </body>
